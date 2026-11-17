@@ -23,7 +23,8 @@ Time-My-Galaxy/
 │   ├── S731BXXS9CZJ2/        profile.json for one build
 │   ├── S731BXXS8BZG1/        profile.json for one build
 │   ├── S731BXXUACZJC/        profile.json for one build
-│   └── S731NKSU9CZIF/        profile.json for one build
+│   ├── S731NKSU9CZIF/        profile.json for one build
+│   └── A376BXXS6BZJ1/        profile.json for one build
 ├── exploit/
 │   ├── build.sh              cross-compiles into build/payload/
 │   └── src/
@@ -73,6 +74,7 @@ Supported builds:
 - `S731BXXS8BZG1`
 - `S731BXXUACZJC`
 - `S731NKSU9CZIF`
+- `A376BXXS6BZJ1`
 
 Each supported build has `payloads/<BUILD>/profile.json`, the porter output
 for that build. The app trusts only that schema. The porter sets `verified`
