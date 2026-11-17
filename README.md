@@ -22,7 +22,8 @@ Time-My-Galaxy/
 │   ├── S731BXXU9CZIF/        profile.json for one build
 │   ├── S731BXXS9CZJ2/        profile.json for one build
 │   ├── S731BXXS8BZG1/        profile.json for one build
-│   └── S731BXXUACZJC/        profile.json for one build
+│   ├── S731BXXUACZJC/        profile.json for one build
+│   └── S731NKSU9CZIF/        profile.json for one build
 ├── exploit/
 │   ├── build.sh              cross-compiles into build/payload/
 │   └── src/
@@ -71,12 +72,12 @@ Supported builds:
 - `S731BXXS9CZJ2`
 - `S731BXXS8BZG1`
 - `S731BXXUACZJC`
+- `S731NKSU9CZIF`
 
 Each supported build has `payloads/<BUILD>/profile.json`, the porter output
-copied unchanged from `port-out/<BUILD>/profile.json`. The app trusts only
-that schema. The porter sets `verified` with `--verified`, which is used only
-after the chain completes on the device. `payloads/ksud` is shared by every
-bundle.
+for that build. The app trusts only that schema. The porter sets `verified`
+with `--verified`, which is used only after the chain completes on the device.
+`payloads/ksud` is shared by every bundle.
 
 The app reads the build id from the device, requests only that build's signed
 manifest and bundle, verifies the signature and every file hash, and stores
