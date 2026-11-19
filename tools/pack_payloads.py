@@ -4,6 +4,7 @@
 Inputs (all tracked in the repository):
 
     payloads/<BUILD>/profile.json   porter output for that firmware
+    payloads/<BUILD>/ksud           KernelSU helper for that build (optional)
     payloads/ksud                   shared KernelSU late-load helper
 
 Built binaries (from exploit/build.sh):
@@ -85,9 +86,9 @@ def main():
     if not profiles:
         sys.exit("no payloads/*/profile.json found")
 
-    ksud = os.path.join(root, "payloads", "ksud")
-    if not os.path.isfile(ksud):
-        sys.exit(f"missing shared helper: {ksud}")
+    shared_ksud = os.path.join(root, "payloads", "ksud")
+    if not os.path.isfile(shared_ksud):
+        sys.exit(f"missing shared helper: {shared_ksud}")
 
     rev = args.rev
     if rev is None:
@@ -103,6 +104,10 @@ def main():
             profile = json.load(handle)
 
         source = os.path.join(root, "build", "payload", build)
+        # A build-specific helper wins: ksud is tied to the device kernel.
+        ksud = os.path.join(root, "payloads", build, "ksud")
+        if not os.path.isfile(ksud):
+            ksud = shared_ksud
         entries = {
             "wr_timerfd": os.path.join(source, "wr_timerfd"),
             "wr_exec": os.path.join(source, "wr_exec"),

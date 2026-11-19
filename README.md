@@ -24,7 +24,8 @@ Time-My-Galaxy/
 │   ├── S731BXXS8BZG1/        profile.json for one build
 │   ├── S731BXXUACZJC/        profile.json for one build
 │   ├── S731NKSU9CZIF/        profile.json for one build
-│   └── A376BXXS6BZJ1/        profile.json for one build
+│   ├── A376BXXS6BZJ1/        profile.json for one build
+│   └── S731U1UES7BZF3/       profile.json + device-specific ksud
 ├── exploit/
 │   ├── build.sh              cross-compiles into build/payload/
 │   └── src/
@@ -75,11 +76,13 @@ Supported builds:
 - `S731BXXUACZJC`
 - `S731NKSU9CZIF`
 - `A376BXXS6BZJ1`
+- `S731U1UES7BZF3`
 
 Each supported build has `payloads/<BUILD>/profile.json`, the porter output
 for that build. The app trusts only that schema. The porter sets `verified`
 with `--verified`, which is used only after the chain completes on the device.
-`payloads/ksud` is shared by every bundle.
+`payloads/ksud` is shared by every bundle. A build that needs its own helper
+puts it at `payloads/<BUILD>/ksud`, which takes precedence for that build.
 
 The app reads the build id from the device, requests only that build's signed
 manifest and bundle, verifies the signature and every file hash, and stores
@@ -168,7 +171,8 @@ PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
 ```
 
 The shared helper at `payloads/ksud` is included in every bundle. If late-load
-fails, replace it with a `ksud` built for the target device, kernel, and KMI.
+fails, put a `ksud` built for the target device, kernel, and KMI at
+`payloads/<BUILD>/ksud` and only that build uses it.
 
 The directory name is the build id. The app reads `VERSION.INCREMENTAL` and
 falls back to `DISPLAY`, `FINGERPRINT`, and `ID`, so no Java table needs
