@@ -18,14 +18,15 @@ use.
 Time-My-Galaxy/
 ├── app/                      Android app (Java sources, manifest, icon)
 ├── payloads/
-│   ├── ksud                  shared KernelSU late-load helper
+│   ├── ksud-6.1.157-android14-11  KernelSU helper for that kernel
+│   ├── ksud-6.1.162-android14-11  KernelSU helper for that kernel
 │   ├── S731BXXU9CZIF/        profile.json for one build
 │   ├── S731BXXS9CZJ2/        profile.json for one build
-│   ├── S731BXXS8BZG1/        profile.json + device-specific ksud
+│   ├── S731BXXS8BZG1/        profile.json for one build
 │   ├── S731BXXUACZJC/        profile.json for one build
 │   ├── S731NKSU9CZIF/        profile.json for one build
 │   ├── A376BXXS6BZJ1/        profile.json for one build
-│   └── S731U1UES7BZF3/       profile.json + device-specific ksud
+│   └── S731U1UES7BZF3/       profile.json for one build
 ├── exploit/
 │   ├── build.sh              cross-compiles into build/payload/
 │   └── src/
@@ -81,8 +82,8 @@ Supported builds:
 Each supported build has `payloads/<BUILD>/profile.json`, the porter output
 for that build. The app trusts only that schema. The porter sets `verified`
 with `--verified`, which is used only after the chain completes on the device.
-`payloads/ksud` is shared by every bundle. A build that needs its own helper
-puts it at `payloads/<BUILD>/ksud`, which takes precedence for that build.
+Each bundle gets the helper for its kernel release, `payloads/ksud-<release>`,
+picked from the kernel version in the profile.
 
 The app reads the build id from the device, requests only that build's signed
 manifest and bundle, verifies the signature and every file hash, and stores
@@ -170,9 +171,10 @@ cp port-out/<BUILD>/profile.json payloads/<BUILD>/profile.json
 PROFILE=port-out/<BUILD>/offsets.h BUILD=<BUILD> ./exploit/build.sh
 ```
 
-The shared helper at `payloads/ksud` is included in every bundle. If late-load
-fails, put a `ksud` built for the target device, kernel, and KMI at
-`payloads/<BUILD>/ksud` and only that build uses it.
+Each bundle gets `payloads/ksud-<release>`, where `<release>` is the kernel
+version from the profile, such as `6.1.157-android14-11`. If late-load fails,
+replace that helper with a `ksud` built for the target device, kernel, and KMI.
+A build whose kernel release has no helper is not published.
 
 The directory name is the build id. The app reads `VERSION.INCREMENTAL` and
 falls back to `DISPLAY`, `FINGERPRINT`, and `ID`, so no Java table needs

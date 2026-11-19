@@ -9,9 +9,17 @@ MODE=${1:-run}
 BUILD=${BUILD:-S731BXXU9CZIF}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN="$ROOT/build/payload/$BUILD"
-HELPER="$ROOT/payloads/ksud"
+PROFILE="$ROOT/payloads/$BUILD/profile.json"
+KERNEL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kernel"]["version"].split()[2])' \
+    "$PROFILE" 2>/dev/null)
+HELPER="$ROOT/payloads/ksud-${KERNEL:-unknown}"
 
 say() { printf '%s\n' "$*"; }
+
+if [ -z "$KERNEL" ]; then
+    say "missing or unreadable profile: $PROFILE"
+    exit 1
+fi
 
 case "$MODE" in
     stage|run) ;;
@@ -32,9 +40,14 @@ adb -s "$D" shell 'echo "uptime=$(cut -d" " -f1 /proc/uptime)"; echo "kernelsu=$
 if [ "$MODE" = "run" ] || [ "$MODE" = "stage" ]; then
     if [ ! -x "$BIN/wr_timerfd" ] || [ ! -x "$BIN/wr_exec" ] || [ ! -f "$HELPER" ]; then
         say "== build =="
-        PROFILE="$ROOT/payloads/$BUILD/profile.json" BUILD="$BUILD" \
+        PROFILE="$PROFILE" BUILD="$BUILD" \
             "$ROOT/exploit/build.sh" || exit 1
     fi
+fi
+
+if [ ! -f "$HELPER" ]; then
+    say "missing helper: $HELPER"
+    exit 1
 fi
 
 say "== stage =="

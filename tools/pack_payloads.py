@@ -4,8 +4,7 @@
 Inputs (all tracked in the repository):
 
     payloads/<BUILD>/profile.json   porter output for that firmware
-    payloads/<BUILD>/ksud           KernelSU helper for that build (optional)
-    payloads/ksud                   shared KernelSU late-load helper
+    payloads/ksud-<KERNEL>          KernelSU helper for that kernel release
 
 Built binaries (from exploit/build.sh):
 
@@ -24,6 +23,7 @@ import glob
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -41,6 +41,13 @@ def sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def kernel_release(profile):
+    """Return the kernel release, such as 6.1.157-android14-11."""
+    version = profile.get("kernel", {}).get("version", "")
+    match = re.match(r"Linux version (\S+)", version)
+    return match.group(1) if match else None
 
 
 def sign(key, data, destination):
@@ -86,10 +93,6 @@ def main():
     if not profiles:
         sys.exit("no payloads/*/profile.json found")
 
-    shared_ksud = os.path.join(root, "payloads", "ksud")
-    if not os.path.isfile(shared_ksud):
-        sys.exit(f"missing shared helper: {shared_ksud}")
-
     rev = args.rev
     if rev is None:
         rev = int(subprocess.check_output(
@@ -104,10 +107,13 @@ def main():
             profile = json.load(handle)
 
         source = os.path.join(root, "build", "payload", build)
-        # A build-specific helper wins: ksud is tied to the device kernel.
-        ksud = os.path.join(root, "payloads", build, "ksud")
+        # ksud is tied to the kernel release, not to the build.
+        release = kernel_release(profile)
+        if not release:
+            sys.exit(f"{build}: cannot read the kernel release from the profile")
+        ksud = os.path.join(root, "payloads", f"ksud-{release}")
         if not os.path.isfile(ksud):
-            ksud = shared_ksud
+            sys.exit(f"{build}: missing helper for {release} at {ksud}")
         entries = {
             "wr_timerfd": os.path.join(source, "wr_timerfd"),
             "wr_exec": os.path.join(source, "wr_exec"),
