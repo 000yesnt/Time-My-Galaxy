@@ -21,7 +21,7 @@ Time-My-Galaxy/
 │   ├── ksud                  shared KernelSU late-load helper
 │   ├── S731BXXU9CZIF/        profile.json for one build
 │   ├── S731BXXS9CZJ2/        profile.json for one build
-│   ├── S731BXXS8BZG1/        profile.json for one build
+│   ├── S731BXXS8BZG1/        profile.json + device-specific ksud
 │   ├── S731BXXUACZJC/        profile.json for one build
 │   ├── S731NKSU9CZIF/        profile.json for one build
 │   ├── A376BXXS6BZJ1/        profile.json for one build
