@@ -70,7 +70,7 @@ flag is set only after a run succeeds on that firmware.
 1. Start Shizuku as the shell user.
 2. Open the app and approve the automatic Shizuku prompt.
 3. Tap **Run exploit**. The app stages the signed payload into
-   `/data/local/tmp/wr` and plants it. Leave the phone idle for 10-60 s.
+   `/data/local/tmp/wr` and plants it. Leave the phone idle for 30-60 s.
 4. Wait for `done`. The app then shows **Root checks** (root, ksud, modules,
    manager) and saves the run to **History** (last 30 runs).
 
