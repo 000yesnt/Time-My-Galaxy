@@ -472,6 +472,20 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     return;
                 }
 
+                // Best effort; never gates the run.
+                try {
+                    ManagerPin.Result pin = ManagerPin.ensure(
+                            getFilesDir(),
+                            (command, timeoutMs) ->
+                                    captureShell(command, timeoutMs, "/data/local/tmp"),
+                            text -> appendLog(text + "\n"));
+                    if (!pin.pinned) {
+                        appendLog("[i] manager: continuing with the exploit\n");
+                    }
+                } catch (Throwable t) {
+                    appendLog("[!] manager: step failed: " + t.getMessage() + "\n");
+                }
+
                 String[] env = new String[]{
                         "PATH=" + SHELL_PATH,
                         "HOME=" + PayloadStore.REMOTE_DIR,
@@ -810,13 +824,17 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         return ShizukuBridge.shellQuote(value);
     }
 
-    /** Runs a shell command through Shizuku with a timeout, merging stdout/stderr. */
     private String captureShell(String command, long timeoutMs) {
+        return captureShell(command, timeoutMs, PayloadStore.REMOTE_DIR);
+    }
+
+    /** Runs a shell command through Shizuku with a timeout, merging stdout/stderr. */
+    private String captureShell(String command, long timeoutMs, String dir) {
         Process process = null;
         StringBuilder out = new StringBuilder();
         try {
             process = ShizukuBridge.exec(new String[]{"/system/bin/sh", "-c", command},
-                    null, PayloadStore.REMOTE_DIR);
+                    null, dir);
             final Process proc = process;
             Thread stdout = drain(proc.getInputStream(), out);
             Thread stderr = drain(proc.getErrorStream(), out);

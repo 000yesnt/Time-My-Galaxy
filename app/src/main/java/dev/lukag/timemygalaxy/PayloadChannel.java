@@ -371,7 +371,7 @@ final class PayloadChannel {
         }
     }
 
-    private static void downloadTo(String url, int connectTimeoutMs, int readTimeoutMs,
+    static void downloadTo(String url, int connectTimeoutMs, int readTimeoutMs,
             long maxBytes, File file) throws IOException {
         HttpURLConnection connection = open(url, connectTimeoutMs, readTimeoutMs);
         try (InputStream in = connection.getInputStream();
