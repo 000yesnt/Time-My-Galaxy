@@ -57,6 +57,22 @@ final class ManagerPin {
     private ManagerPin() {
     }
 
+    /** Human-readable install state for the Tools card. */
+    static String status(Shell shell) {
+        Installed now = read(shell);
+        if (now == null) {
+            return "cannot read package state";
+        }
+        if (!now.present) {
+            return "not installed";
+        }
+        if (now.code < 0) {
+            return "installed, version unreadable";
+        }
+        return now.name + " (" + now.code + ")"
+                + (now.code == VERSION_CODE ? " · pinned" : " · needs 3.2.5");
+    }
+
     static Result ensure(File filesDir, Shell shell, Log log) {
         boolean swapped = false;
         try {

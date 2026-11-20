@@ -2,6 +2,7 @@ package dev.lukag.timemygalaxy;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -18,8 +19,10 @@ import java.security.MessageDigest;
 import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -67,10 +70,124 @@ final class PayloadChannel {
     private static final int MAX_MANIFEST_BYTES = 256 * 1024;
     private static final int MAX_SIGNATURE_BYTES = 16 * 1024;
     private static final long MAX_ZIP_BYTES = 64L * 1024 * 1024;
+    private static final int MAX_INDEX_BYTES = 256 * 1024;
+    private static final int MAX_INDEX_ENTRIES = 100;
     private static final String MANIFEST = "manifest.json";
     private static final String MANIFEST_SIG = "manifest.json.sig";
 
+    static final class BuildEntry {
+        final String build;
+        final String model;
+        final String soc;
+        final String android;
+        final boolean verified;
+        final int rev;
+
+        BuildEntry(String build, String model, String soc, String android,
+                boolean verified, int rev) {
+            this.build = build;
+            this.model = model == null || model.isEmpty() ? "unknown" : model;
+            this.soc = soc == null || soc.isEmpty() ? null : soc;
+            this.android = android == null || android.isEmpty() ? null : android;
+            this.verified = verified;
+            this.rev = rev;
+        }
+
+        String describe() {
+            StringBuilder out = new StringBuilder(model);
+            if (soc != null) {
+                out.append(" · ").append(soc);
+            }
+            if (android != null) {
+                out.append(" · Android ").append(android);
+            }
+            out.append(" · ").append(verified ? "verified" : "untested");
+            if (rev > 0) {
+                out.append(" · rev ").append(rev);
+            }
+            return out.toString();
+        }
+    }
+
+    static final class Index {
+        final List<BuildEntry> builds;
+        final int rev;
+        final boolean cached;
+
+        Index(List<BuildEntry> builds, int rev, boolean cached) {
+            this.builds = builds;
+            this.rev = rev;
+            this.cached = cached;
+        }
+    }
+
     private PayloadChannel() {
+    }
+
+    /** Signed list of supported builds. Falls back to the saved copy offline. */
+    static Index index(Context context, Log log) throws Exception {
+        File dir = new File(context.getFilesDir(), "builds");
+        File rawFile = new File(dir, "index.json");
+        File sigFile = new File(dir, "index.json.sig");
+        byte[] raw;
+        byte[] signature;
+        boolean cached = false;
+        try {
+            raw = download(BASE + "index.json", MANIFEST_TIMEOUT_MS, MAX_INDEX_BYTES);
+            signature = download(BASE + "index.json.sig", MANIFEST_TIMEOUT_MS,
+                    MAX_SIGNATURE_BYTES);
+            verify(context, raw, signature);
+        } catch (Throwable t) {
+            if (!rawFile.isFile() || !sigFile.isFile()) {
+                throw t instanceof Exception ? (Exception) t : new IOException(message(t));
+            }
+            raw = readAll(rawFile, MAX_INDEX_BYTES);
+            signature = readAll(sigFile, MAX_SIGNATURE_BYTES);
+            verify(context, raw, signature);
+            cached = true;
+        }
+        Index index = parseIndex(raw, cached);
+        if (!cached) {
+            if (!dir.isDirectory() && !dir.mkdirs()) {
+                throw new IOException("cannot create " + dir);
+            }
+            writeAtomic(rawFile, raw);
+            writeAtomic(sigFile, signature);
+        }
+        if (log != null) {
+            log.line("[+] builds index rev " + index.rev + ", " + index.builds.size()
+                    + " build(s)" + (cached ? ", saved copy" : "") + "\n");
+        }
+        return index;
+    }
+
+    private static Index parseIndex(byte[] raw, boolean cached) throws Exception {
+        JSONObject json = new JSONObject(new String(raw, StandardCharsets.UTF_8));
+        if (json.optInt("schema", 0) != 1) {
+            throw new IOException("unsupported builds schema");
+        }
+        JSONArray builds = json.optJSONArray("builds");
+        if (builds == null) {
+            throw new IOException("builds table missing");
+        }
+        List<BuildEntry> entries = new ArrayList<>();
+        for (int i = 0; i < builds.length() && entries.size() < MAX_INDEX_ENTRIES; i++) {
+            JSONObject item = builds.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String build = item.optString("build", "");
+            if (!PayloadStore.usableBuild(build)) {
+                continue;
+            }
+            entries.add(new BuildEntry(build,
+                    item.optString("model", "unknown"),
+                    item.optString("soc", null),
+                    item.optString("android", null),
+                    item.optBoolean("verified", false),
+                    item.optInt("rev", 0)));
+        }
+        return new Index(entries, json.optInt("rev", 0), cached);
     }
 
     static Resolution resolve(Context context, Log log) {

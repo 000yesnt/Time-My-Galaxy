@@ -19,6 +19,16 @@ if (releaseSigningReady) {
 def keystorePass = keystoreProps.getProperty('storePassword',
         keystoreProps.getProperty('password'))
 
+// Short commit for the version line. A source archive without git still builds.
+def gitCommit = "unknown"
+try {
+    gitCommit = providers.exec {
+        workingDir rootDir
+        commandLine "git", "rev-parse", "--short=12", "HEAD"
+    }.standardOutput.asText.get().trim()
+} catch (Throwable ignored) {
+}
+
 gradle.taskGraph.whenReady { graph ->
     if (graph.hasTask(':app:assembleRelease') && !releaseSigningReady) {
         throw new GradleException("release signing properties not found: "
@@ -36,6 +46,14 @@ android {
         targetSdk 35
         versionCode 6
         versionName '1.4'
+
+        buildConfigField "String", "GIT_COMMIT", "\"${gitCommit}\""
+        buildConfigField "String", "REPO_URL",
+                "\"https://github.com/MocLG/Time-My-Galaxy\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     signingConfigs {
@@ -71,6 +89,10 @@ android {
 
 dependencies {
     implementation 'androidx.annotation:annotation:1.9.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.core:core:1.13.0'
+    implementation 'androidx.viewpager2:viewpager2:1.0.0'
+    implementation 'com.google.android.material:material:1.12.0'
     implementation 'dev.rikka.shizuku:api:13.1.5'
     implementation 'dev.rikka.shizuku:provider:13.1.5'
 }

@@ -10,7 +10,7 @@ inside its own sandbox.
 
 Payloads are not bundled in the APK. On first use the app downloads the
 bundle for the running build from a signed channel and keeps it for offline
-use.
+use. The app runs on Android 12 or newer.
 
 ## Layout
 
@@ -94,13 +94,35 @@ The first run needs a working internet connection.
 ## Use
 
 1. Start Shizuku as the shell user.
-2. Open the app and tap **Grant Shizuku**.
-3. Tap **Refetch payload** to check the signed channel again, or go straight
-   to **Run exploit**, which refetches, stages the payload into
+2. Open the app and tap the Shizuku chip to grant access.
+3. Tap **Run exploit**. The app refetches the signed payload, stages it into
    `/data/local/tmp/wr`, and plants it. Leave the phone alone for 30-60 s.
-4. Wait for `done` in the log, then **Check root**.
-5. **Restart SystemUI** only works when `su` returns uid 0. It reloads the
-   interface and leaves a parked exploit alone.
+4. Wait for `done` in the live log. The app then runs the root checks itself.
+5. **Tools** holds the manager state, supported builds, Restart SystemUI,
+   soft reboot, diagnostics, and the root command. **History** keeps the last
+   30 runs.
+
+One plant per boot. The app records the kernel boot id and disables Run until a
+real reboot. A soft reboot does not clear it.
+
+**Copy log** copies the current log as plain text.
+
+**Restart SystemUI** only works when `su` returns uid 0. It reloads the
+interface and leaves a parked exploit alone.
+
+**Soft reboot** runs `ksud soft-reboot`, the same path as KernelSU Manager.
+Android userspace restarts, the kernel is not rebooted, and root stays loaded.
+
+**Export diagnostics** writes one uncapped text file with every log from
+`/data/local/tmp/wr` plus the app session log, then opens the share sheet. It
+works without root and adds the root-only files when su is available.
+
+**Supported builds** reads the signed index and falls back to the running
+build when the index cannot be fetched.
+
+**Dark mode**, the update check, and the version and commit links sit on the
+Tools page and the header. The update check reads the latest GitHub release and
+is cached for a day.
 
 The helper stages `ksud` to `/data/local/tmp/.ksud-stage`, bind-mounts it over
 `/system/bin/logcat`, and late-loads it. The exploit writes

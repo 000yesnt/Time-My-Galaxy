@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tmg_primary">#2F7D5D</color>
+    <color name="tmg_on_primary">#FFFFFF</color>
+    <color name="tmg_primary_container">#B8F0D4</color>
+    <color name="tmg_on_primary_container">#002114</color>
+    <color name="tmg_secondary_container">#D6E8DD</color>
+    <color name="tmg_on_secondary_container">#141F19</color>
+    <color name="tmg_surface_light">#F6FBF7</color>
+    <color name="tmg_surface_dark">#101512</color>
+    <color name="tmg_outline">#6F7A73</color>
+    <color name="tmg_good">#1E7B4F</color>
+    <color name="tmg_bad">#B3261E</color>
+</resources>

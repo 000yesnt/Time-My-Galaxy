@@ -1,34 +1,58 @@
 package dev.lukag.timemygalaxy;
 
-import android.app.Activity;
-import android.app.AlertDialog;
+import android.Manifest;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.graphics.Insets;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.InputType;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
-import android.text.method.ScrollingMovementMethod;
+import android.text.TextPaint;
+import android.text.method.LinkMovementMethod;
+import android.text.style.ClickableSpan;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.text.style.UnderlineSpan;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.viewpager2.widget.ViewPager2;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.color.MaterialColors;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.materialswitch.MaterialSwitch;
+
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,7 +64,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * destroyed on success or when the activity closes. A planted run needs a
  * reboot to clean up; killing it can panic the kernel.
  */
-public class MainActivity extends Activity implements PayloadStore.Log {
+public class MainActivity extends AppCompatActivity implements PayloadStore.Log {
 
     private static final int REQUEST_SHIZUKU = 0x5752;
     private static final String SHELL_PATH =
@@ -52,28 +76,54 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     private static final int LOG_LIMIT = 150_000;
     private static final String UI_PREFS = "wroot-ui";
     private static final String PREF_DARK = "dark";
+    private static final String PREF_PAGE = "page";
     private static final String LOAD_LOG = PayloadStore.REMOTE_DIR + "/wr_load.log";
     private static final String EXEC_LOG = PayloadStore.REMOTE_DIR + "/wr_exec.log";
     private static final String RUN_LOG = PayloadStore.REMOTE_DIR + "/run.log";
+    private static final String STAGED_KSUD = PayloadStore.REMOTE_DIR + "/ksud";
+    private static final String ADB_KSUD = "/data/adb/ksud";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy = new AtomicBoolean();
     private final StringBuilder logBuffer = new StringBuilder();
 
-    private TextView statusView;
-    private TextView gateView;
+    private ViewPager2 pager;
+    private BottomNavigationView bottomNav;
+    private TextView versionLine;
+
+    private TextView shizukuChip;
+    private TextView buildChip;
+    private MaterialCardView gateCard;
+    private TextView gateText;
+    private MaterialCardView checksCard;
+    private TextView checksText;
     private TextView logView;
     private ScrollView logScroll;
-    private boolean followLogs = true;
-    private Button grantButton;
-    private Button stageButton;
     private Button runButton;
-    private Button stopButton;
-    private Button checkButton;
-    private Button commandButton;
+    private Button copyButton;
+
+    private TextView managerStatus;
+    private TextView deviceInfo;
+    private TextView updateStatus;
+    private TextView aboutText;
+    private Button repairButton;
+    private Button buildsButton;
+    private Button systemUiButton;
+    private Button softRebootButton;
+    private Button diagnosticsButton;
+    private Button updateButton;
+    private Button repoButton;
     private EditText commandInput;
-    private CheckBox darkCheck;
+    private Button commandButton;
+    private Button checkButton;
+    private TextView commandOutput;
+    private MaterialSwitch darkSwitch;
+
+    private LinearLayout historyList;
+    private TextView historyEmpty;
+    private Button clearHistoryButton;
+
     private volatile Process tailProcess;
     private volatile String exploitPid;
     private volatile Targets.Target target;
@@ -82,6 +132,8 @@ public class MainActivity extends Activity implements PayloadStore.Log {
 
     private volatile boolean ksuReady;
     private boolean darkTheme;
+    private boolean followLogs = true;
+    private boolean autoRequested;
     private int ansiDefaultColor = 0xFFF0F0F0;
 
     private boolean isDarkEnabled() {
@@ -97,18 +149,393 @@ public class MainActivity extends Activity implements PayloadStore.Log {
     protected void onCreate(Bundle savedInstanceState) {
         darkTheme = isDarkEnabled();
         ansiDefaultColor = darkTheme ? 0xFFF2F2F2 : 0xFF111111;
-        setTheme(darkTheme ? android.R.style.Theme_Material
-                : android.R.style.Theme_Material_Light);
+        setTheme(darkTheme ? R.style.Theme_TMG_Dark : R.style.Theme_TMG);
         super.onCreate(savedInstanceState);
-        setContentView(buildUi());
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        setContentView(R.layout.activity_main);
 
+        bindChrome();
+        applyInsets();
         gateResult = DeviceGate.check(null);
         target = null;
-        gateView.setText(gateResult.detail);
+
         appendLog("Time-My-Galaxy\n");
         appendLog("Transport: Shizuku shell (uid 2000)\n\n");
         refreshStatus();
+        refreshVersionLine();
         resolvePayload(this::initialResolved);
+        ui.postDelayed(this::autoRequestShizuku, 600);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        refreshVersionLine();
+        refreshUpdateStatus();
+        refreshStatus();
+        if (pager != null && pager.getCurrentItem() == 2) {
+            rebuildHistory();
+        }
+        autoRequestShizuku();
+    }
+
+    /** Asks for Shizuku as soon as the app opens, without the chip. */
+    private void autoRequestShizuku() {
+        if (autoRequested || busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || ShizukuBridge.isGranted()) {
+            return;
+        }
+        autoRequested = true;
+        requestShizuku();
+    }
+
+    private void bindChrome() {
+        pager = findViewById(R.id.pager);
+        bottomNav = findViewById(R.id.bottomNav);
+        versionLine = findViewById(R.id.versionLine);
+        pager.setAdapter(new PagesAdapter());
+        pager.setOffscreenPageLimit(2);
+        pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
+            @Override
+            public void onPageSelected(int position) {
+                bottomNav.getMenu().getItem(position).setChecked(true);
+                getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit()
+                        .putInt(PREF_PAGE, position).apply();
+                if (position == 1) {
+                    refreshManagerStatus();
+                    refreshDeviceInfo();
+                    refreshUpdateStatus();
+                } else if (position == 2) {
+                    rebuildHistory();
+                }
+            }
+        });
+        bottomNav.setOnItemSelectedListener(item -> {
+            int index = item.getItemId() == R.id.tab_exploit ? 0
+                    : item.getItemId() == R.id.tab_tools ? 1 : 2;
+            if (pager.getCurrentItem() != index) {
+                pager.setCurrentItem(index, true);
+            }
+            return true;
+        });
+        int saved = getSharedPreferences(UI_PREFS, MODE_PRIVATE).getInt(PREF_PAGE, 0);
+        bottomNav.getMenu().getItem(saved).setChecked(true);
+        if (saved > 0) {
+            pager.setCurrentItem(saved, false);
+        }
+        pager.post(this::refreshStatus);
+    }
+
+    private void applyInsets() {
+        View root = findViewById(R.id.root);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars()
+                    | WindowInsetsCompat.Type.displayCutout());
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
+        });
+    }
+
+    private final class PagesAdapter extends RecyclerView.Adapter<PagesAdapter.Holder> {
+
+        @NonNull
+        @Override
+        public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            int layout = viewType == 0 ? R.layout.page_exploit
+                    : viewType == 1 ? R.layout.page_tools : R.layout.page_history;
+            View view = getLayoutInflater().inflate(layout, parent, false);
+            if (viewType == 0) {
+                bindExploitPage(view);
+            } else if (viewType == 1) {
+                bindToolsPage(view);
+            } else {
+                bindHistoryPage(view);
+            }
+            return new Holder(view);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull Holder holder, int position) {
+        }
+
+        @Override
+        public int getItemCount() {
+            return 3;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return position;
+        }
+
+        final class Holder extends RecyclerView.ViewHolder {
+            Holder(View itemView) {
+                super(itemView);
+            }
+        }
+    }
+
+    private void bindExploitPage(View view) {
+        shizukuChip = view.findViewById(R.id.shizukuChip);
+        buildChip = view.findViewById(R.id.buildChip);
+        gateCard = view.findViewById(R.id.gateCard);
+        gateText = view.findViewById(R.id.gateText);
+        checksCard = view.findViewById(R.id.checksCard);
+        checksText = view.findViewById(R.id.checksText);
+        logScroll = view.findViewById(R.id.logScroll);
+        logView = view.findViewById(R.id.logView);
+        runButton = view.findViewById(R.id.runButton);
+        copyButton = view.findViewById(R.id.copyButton);
+
+        logView.setTextColor(ansiDefaultColor);
+        logScroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> followLogs = isLogAtBottom());
+        shizukuChip.setOnClickListener(v -> requestShizuku());
+        buildChip.setOnClickListener(v -> refetchPayload());
+        runButton.setOnClickListener(v -> confirmRun());
+        copyButton.setOnClickListener(v -> copyLog());
+        renderLogNow();
+        refreshStatus();
+    }
+
+    private void bindToolsPage(View view) {
+        managerStatus = view.findViewById(R.id.managerStatus);
+        deviceInfo = view.findViewById(R.id.deviceInfo);
+        updateStatus = view.findViewById(R.id.updateStatus);
+        aboutText = view.findViewById(R.id.aboutText);
+        repairButton = view.findViewById(R.id.repairButton);
+        buildsButton = view.findViewById(R.id.buildsButton);
+        systemUiButton = view.findViewById(R.id.systemUiButton);
+        softRebootButton = view.findViewById(R.id.softRebootButton);
+        diagnosticsButton = view.findViewById(R.id.diagnosticsButton);
+        updateButton = view.findViewById(R.id.updateButton);
+        repoButton = view.findViewById(R.id.repoButton);
+        commandInput = view.findViewById(R.id.commandInput);
+        commandOutput = view.findViewById(R.id.commandOutput);
+        commandButton = view.findViewById(R.id.commandButton);
+        checkButton = view.findViewById(R.id.checkButton);
+        darkSwitch = view.findViewById(R.id.darkSwitch);
+
+        repairButton.setOnClickListener(v -> repairManager());
+        buildsButton.setOnClickListener(v ->
+                startActivity(new Intent(this, BuildsActivity.class)));
+        systemUiButton.setOnClickListener(v -> confirmRestartSystemUi());
+        softRebootButton.setOnClickListener(v -> confirmSoftReboot());
+        diagnosticsButton.setOnClickListener(v -> confirmDiagnostics());
+        updateButton.setOnClickListener(v -> checkNow());
+        repoButton.setOnClickListener(v -> openUrl(BuildConfig.REPO_URL));
+        commandButton.setOnClickListener(v -> runRootCommand());
+        checkButton.setOnClickListener(v -> runChecksNow());
+        commandInput.setOnClickListener(v -> showKeyboard());
+        commandInput.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                showKeyboard();
+            }
+        });
+        commandInput.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_GO
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                hideKeyboard();
+                runRootCommand();
+                return true;
+            }
+            return false;
+        });
+
+        darkSwitch.setChecked(darkTheme);
+        darkSwitch.setOnCheckedChangeListener((button, checked) -> {
+            getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(PREF_DARK, checked).apply();
+            recreate();
+        });
+
+        aboutText.setText("Time My Galaxy " + BuildConfig.VERSION_NAME
+                + " (" + BuildConfig.VERSION_CODE + ")\nCommit " + BuildConfig.GIT_COMMIT
+                + "\n" + BuildConfig.REPO_URL);
+        refreshManagerStatus();
+        refreshDeviceInfo();
+        refreshUpdateStatus();
+    }
+
+    private void bindHistoryPage(View view) {
+        historyList = view.findViewById(R.id.historyList);
+        historyEmpty = view.findViewById(R.id.historyEmpty);
+        clearHistoryButton = view.findViewById(R.id.clearHistoryButton);
+        clearHistoryButton.setOnClickListener(v -> confirmClearHistory());
+        rebuildHistory();
+    }
+
+    private void refreshStatus() {
+        boolean running = ShizukuBridge.isRunning();
+        boolean granted = running && ShizukuBridge.isGranted();
+        String blocked = RunStore.blockReason(this);
+        boolean hasPayload = target != null && target.dir != null;
+
+        if (shizukuChip != null) {
+            shizukuChip.setText("● " + (running
+                    ? (granted ? "Shizuku ready" : "Shizuku permission")
+                    : "Shizuku off"));
+        }
+        if (buildChip != null) {
+            buildChip.setText(hasPayload
+                    ? "● " + target.build + (target.verified ? "" : " · untested")
+                    : "● No payload");
+        }
+        if (gateCard != null) {
+            // The plant is marked at launch, so keep the warning hidden until
+            // the run has finished instead of showing it mid-run.
+            if (blocked != null && !busy.get()) {
+                gateCard.setVisibility(View.VISIBLE);
+                gateText.setText(blocked);
+            } else if (!hasPayload && gateResult != null && !busy.get()) {
+                gateCard.setVisibility(View.VISIBLE);
+                gateText.setText(gateResult.detail);
+            } else {
+                gateCard.setVisibility(View.GONE);
+            }
+        }
+        if (runButton != null) {
+            runButton.setEnabled(!busy.get() && granted && hasPayload && blocked == null);
+        }
+        if (copyButton != null) {
+            copyButton.setEnabled(logBuffer.length() > 0);
+        }
+        setEnabled(!busy.get(), repairButton, buildsButton, systemUiButton, softRebootButton,
+                diagnosticsButton, updateButton, repoButton);
+        if (commandButton != null) {
+            commandButton.setEnabled(!busy.get() && granted);
+            checkButton.setEnabled(!busy.get() && granted);
+        }
+        if (darkSwitch != null) {
+            darkSwitch.setEnabled(!busy.get());
+        }
+    }
+
+    private void setEnabled(boolean enabled, View... views) {
+        for (View view : views) {
+            if (view != null) {
+                view.setEnabled(enabled);
+            }
+        }
+    }
+
+    private void refreshManagerStatus() {
+        if (managerStatus == null) {
+            return;
+        }
+        executor.execute(() -> {
+            String status;
+            try {
+                status = ManagerPin.status((command, timeoutMs) ->
+                        captureShell(command, timeoutMs, "/data/local/tmp"));
+            } catch (Throwable t) {
+                status = "unavailable: " + message(t);
+            }
+            final String text = status;
+            ui.post(() -> {
+                if (managerStatus != null) {
+                    managerStatus.setText(text);
+                }
+            });
+        });
+    }
+
+    private void refreshDeviceInfo() {
+        if (deviceInfo != null) {
+            deviceInfo.setText(BuildInfo.from(target).describe());
+        }
+    }
+
+    private void refreshUpdateStatus() {
+        if (updateStatus == null) {
+            return;
+        }
+        UpdateCheck.Latest latest = UpdateCheck.cached(this);
+        if (latest == null) {
+            updateStatus.setText("Not checked yet");
+            return;
+        }
+        StringBuilder text = new StringBuilder(latest.tag)
+                .append(" · checked ").append(RunStore.time(latest.checkedAt));
+        if (UpdateCheck.isNewer(latest.tag)) {
+            text.append(" · update available");
+        } else {
+            text.append(" · up to date");
+        }
+        updateStatus.setText(text.toString());
+    }
+
+    private void refreshVersionLine() {
+        if (versionLine == null) {
+            return;
+        }
+        SpannableStringBuilder line = new SpannableStringBuilder();
+        String head = "Time My Galaxy " + BuildConfig.VERSION_NAME
+                + " (" + BuildConfig.VERSION_CODE + ")";
+        int start = line.length();
+        line.append(head);
+        addLink(line, start, line.length(), BuildConfig.REPO_URL);
+        line.append(" · ");
+        String commit = BuildConfig.GIT_COMMIT;
+        start = line.length();
+        line.append(commit);
+        if (commit.matches("[0-9a-fA-F]{7,40}")) {
+            addLink(line, start, line.length(), BuildConfig.REPO_URL + "/commit/" + commit);
+        }
+        UpdateCheck.Latest latest = UpdateCheck.cached(this);
+        if (latest != null && UpdateCheck.isNewer(latest.tag)) {
+            line.append(" · ");
+            start = line.length();
+            line.append("update ").append(latest.tag);
+            addLink(line, start, line.length(), latest.url);
+        }
+        versionLine.setText(line);
+        versionLine.setMovementMethod(LinkMovementMethod.getInstance());
+    }
+
+    private void addLink(SpannableStringBuilder text, int start, int end, String url) {
+        ClickableSpan span = new ClickableSpan() {
+            @Override
+            public void onClick(@NonNull View widget) {
+                openUrl(url);
+            }
+
+            @Override
+            public void updateDrawState(@NonNull TextPaint paint) {
+                paint.setColor(MaterialColors.getColor(versionLine,
+                        com.google.android.material.R.attr.colorPrimary));
+                paint.setUnderlineText(false);
+            }
+        };
+        text.setSpan(span, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Throwable t) {
+            appendLog("[!] cannot open " + url + ": " + message(t) + "\n");
+        }
+    }
+
+    private void checkNow() {
+        if (busy.get()) {
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("[*] checking latest release\n");
+                UpdateCheck.check(this, true, text -> appendLog(text + "\n"));
+            } finally {
+                setBusy(false);
+                ui.post(() -> {
+                    refreshUpdateStatus();
+                    refreshVersionLine();
+                });
+            }
+        });
     }
 
     private void initialResolved() {
@@ -143,7 +570,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             try {
                 resolution = PayloadChannel.resolve(this, text -> appendLog(text));
             } catch (Throwable t) {
-                appendLog("[-] payload setup failed: " + t.getMessage() + "\n");
+                appendLog("[-] payload setup failed: " + message(t) + "\n");
             }
             final PayloadChannel.Resolution resolved = resolution;
             ui.post(() -> {
@@ -170,155 +597,8 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     + (resolution.error == null ? "unknown error" : resolution.error) + "\n");
         }
         gateResult = DeviceGate.check(target);
-        gateView.setText(gateResult.detail);
         refreshStatus();
-    }
-
-    private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        final int pad = dp(16);
-        root.setPadding(pad, pad, pad, pad);
-        root.setOnApplyWindowInsetsListener((view, insets) -> {
-            Insets bars = insets.getInsets(
-                    WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-            view.setPadding(pad + bars.left, pad + bars.top, pad + bars.right, pad + bars.bottom);
-            return insets;
-        });
-
-        TextView title = new TextView(this);
-        title.setText("Time-My-Galaxy");
-        title.setTextSize(22);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(accentColor());
-        root.addView(title);
-
-        statusView = new TextView(this);
-        statusView.setTextSize(14);
-        statusView.setPadding(0, dp(8), 0, dp(4));
-        statusView.setTextColor(accentColor());
-        root.addView(statusView);
-
-        gateView = new TextView(this);
-        gateView.setTextSize(12);
-        gateView.setTypeface(Typeface.MONOSPACE);
-        gateView.setPadding(0, 0, 0, dp(8));
-        root.addView(gateView);
-
-        LinearLayout row1 = new LinearLayout(this);
-        row1.setOrientation(LinearLayout.HORIZONTAL);
-        grantButton = button("Grant Shizuku");
-        grantButton.setOnClickListener(v -> requestShizuku());
-        stageButton = button("Refetch payload");
-        stageButton.setOnClickListener(v -> refetchPayload());
-        row1.addView(grantButton, weight());
-        row1.addView(stageButton, weight());
-        root.addView(row1);
-
-        LinearLayout row2 = new LinearLayout(this);
-        row2.setOrientation(LinearLayout.HORIZONTAL);
-        runButton = button("Run exploit");
-        runButton.setOnClickListener(v -> confirmRun());
-        stopButton = button("Restart SystemUI");
-        stopButton.setOnClickListener(v -> confirmRestartSystemUi());
-        row2.addView(runButton, weight());
-        row2.addView(stopButton, weight());
-        root.addView(row2);
-
-        darkCheck = new CheckBox(this);
-        darkCheck.setText("Dark mode");
-        darkCheck.setTextSize(12);
-        darkCheck.setChecked(isDarkEnabled());
-        darkCheck.setOnCheckedChangeListener((buttonView, checked) -> {
-            getSharedPreferences(UI_PREFS, MODE_PRIVATE).edit()
-                    .putBoolean(PREF_DARK, checked).apply();
-            recreate();
-        });
-        root.addView(darkCheck);
-
-        TextView rootLabel = new TextView(this);
-        rootLabel.setText("Root command (after the helper reports done)");
-        rootLabel.setTextSize(14);
-        rootLabel.setPadding(0, dp(8), 0, 0);
-        rootLabel.setTextColor(accentColor());
-        root.addView(rootLabel);
-
-        commandInput = new EditText(this);
-        commandInput.setHint("id");
-        commandInput.setText("id");
-        commandInput.setSingleLine(true);
-        commandInput.setInputType(InputType.TYPE_CLASS_TEXT);
-        root.addView(commandInput);
-
-        LinearLayout row3 = new LinearLayout(this);
-        row3.setOrientation(LinearLayout.HORIZONTAL);
-        commandButton = button("Run as root");
-        commandButton.setOnClickListener(v -> runRootCommand());
-        checkButton = button("Check root");
-        checkButton.setOnClickListener(v -> {
-            commandInput.setText("id");
-            runRootCommand();
-        });
-        row3.addView(commandButton, weight());
-        row3.addView(checkButton, weight());
-        root.addView(row3);
-
-        logScroll = new ScrollView(this);
-        LinearLayout.LayoutParams scrollParams =
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        scrollParams.topMargin = dp(8);
-        logScroll.setLayoutParams(scrollParams);
-        logScroll.setOnScrollChangeListener((view, scrollX, scrollY, oldScrollX, oldScrollY) ->
-                followLogs = isLogAtBottom());
-
-        logView = new TextView(this);
-        logView.setTextSize(11);
-        logView.setTextColor(ansiDefaultColor);
-        logView.setTypeface(Typeface.MONOSPACE);
-        logView.setTextIsSelectable(true);
-        logView.setMovementMethod(new ScrollingMovementMethod());
-        logView.setPadding(dp(8), dp(8), dp(8), dp(8));
-        logScroll.addView(logView, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(logScroll);
-
-        return root;
-    }
-
-    private Button button(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        return button;
-    }
-
-    private LinearLayout.LayoutParams weight() {
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        params.setMarginStart(dp(4));
-        params.setMarginEnd(dp(4));
-        return params;
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private void refreshStatus() {
-        boolean running = ShizukuBridge.isRunning();
-        boolean granted = running && ShizukuBridge.isGranted();
-        statusView.setText("Shizuku: " + (running
-                ? (granted ? "running, granted" : "running, permission needed")
-                : "not running")
-                + "   |   Target: " + (target == null ? "no payload" : target.build)
-                + "   |   Root: " + (ksuReady ? "KernelSU" : "not loaded"));
-        grantButton.setEnabled(!busy.get());
-        // The handlers resolve the payload on demand, so leave stage and run
-        // enabled when the last fetch failed and let the user retry.
-        stageButton.setEnabled(!busy.get() && granted);
-        runButton.setEnabled(!busy.get() && granted);
-        stopButton.setEnabled(!busy.get() && granted);
-        commandButton.setEnabled(!busy.get() && granted);
-        checkButton.setEnabled(!busy.get() && granted);
+        refreshDeviceInfo();
     }
 
     private void setBusy(boolean value) {
@@ -339,7 +619,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
 
     private void requestShizuku() {
         if (!ShizukuBridge.isRunning()) {
-            new AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(this)
                     .setTitle("Shizuku is not running")
                     .setMessage("Start Shizuku as the shell user first.\n\n"
                             + "Without a PC: pair through Shizuku's on-device wireless "
@@ -351,11 +631,13 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     .show();
             return;
         }
-        ShizukuBridge.requestPermission(REQUEST_SHIZUKU, (granted, error) -> runOnUiThread(() -> {
-            appendLog(granted ? "[+] Shizuku permission granted\n"
-                    : "[-] " + (error == null ? "Shizuku permission denied" : error) + "\n");
-            refreshStatus();
-        }));
+        ShizukuBridge.requestPermission(REQUEST_SHIZUKU, (granted, error) ->
+                runOnUiThread(() -> {
+                    appendLog(granted ? "[+] Shizuku permission granted\n"
+                            : "[-] " + (error == null ? "Shizuku permission denied" : error)
+                                    + "\n");
+                    refreshStatus();
+                }));
     }
 
     private void refetchPayload() {
@@ -369,7 +651,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 return;
             }
             if (!current.verified) {
-                new AlertDialog.Builder(this)
+                new MaterialAlertDialogBuilder(this)
                         .setTitle("Untested payload")
                         .setMessage("Payload " + current.build + " is not verified on this "
                                 + "firmware.\n\n"
@@ -394,7 +676,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 PayloadStore.stageAll(current.dir, current.build, this);
                 appendLog("[+] staging complete\n");
             } catch (Throwable t) {
-                appendLog("[-] staging failed: " + t.getMessage() + "\n");
+                appendLog("[-] staging failed: " + message(t) + "\n");
             } finally {
                 setBusy(false);
             }
@@ -403,6 +685,11 @@ public class MainActivity extends Activity implements PayloadStore.Log {
 
     private void confirmRun() {
         if (busy.get()) {
+            return;
+        }
+        String blocked = RunStore.blockReason(this);
+        if (blocked != null) {
+            showLedgerDialog(blocked);
             return;
         }
         resolvePayload(() -> {
@@ -414,7 +701,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             String untested = current.verified ? "" : "\n\n"
                     + "WARNING: payload " + current.build + " is NOT verified on this "
                     + "firmware. An untested build can panic the kernel.";
-            new AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(this)
                     .setTitle(current.verified ? "Run the exploit?" : "Run the UNTESTED exploit?")
                     .setMessage("Target " + current.build + " (" + current.describe() + ").\n\n"
                             + "Stages the payload, then runs wr_timerfd as uid 2000 (Shizuku shell).\n\n"
@@ -438,26 +725,53 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             requestShizuku();
             return;
         }
+        if (RunStore.blockReason(this) != null) {
+            showLedgerDialog(RunStore.blockReason(this));
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            appendLog("[i] notifications are off; the run notification may be hidden\n");
+        }
         executor.execute(() -> {
             setBusy(true);
             Process tail = null;
+            RunStore.Begin record = null;
+            long startedAt = System.currentTimeMillis();
+            boolean planted = false;
+            boolean swapped = false;
+            String outcome = "error";
+            String detail = "";
             try {
                 Targets.Target current = target;
                 if (current == null || current.dir == null) {
                     appendLog("[-] no payload for this firmware\n");
+                    outcome = "no payload";
                     return;
                 }
+                String blocked = RunStore.blockReason(this);
+                if (blocked != null) {
+                    appendLog("[!] " + blocked.replace("\n\n", " ") + "\n");
+                    outcome = "blocked";
+                    return;
+                }
+                RunService.start(this, current.build);
+                RunService.update("Staging payload " + current.build);
+
                 appendLog("[*] staging payload " + current.build + " before running\n");
                 PayloadStore.stageAll(current.dir, current.build, this);
 
                 String parked = readPidOrNull();
                 if (parked == null) {
                     appendLog("[-] lost Shizuku before planting\n");
+                    outcome = "lost";
                     return;
                 }
                 if (!parked.isEmpty()) {
                     appendLog("[-] wr_timerfd already running: pid " + parked + "\n");
                     appendLog("[i] a planted run is cleaned only by reboot\n");
+                    outcome = "already parked";
                     return;
                 }
 
@@ -469,6 +783,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 if (!cleared.contains("cleaned")) {
                     appendLog("[-] cannot clear old logs: "
                             + (cleared.isEmpty() ? "no output" : cleared) + "\n");
+                    outcome = "log clear failed";
                     return;
                 }
 
@@ -479,11 +794,12 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                             (command, timeoutMs) ->
                                     captureShell(command, timeoutMs, "/data/local/tmp"),
                             text -> appendLog(text + "\n"));
+                    swapped = pin.swapped;
                     if (!pin.pinned) {
                         appendLog("[i] manager: continuing with the exploit\n");
                     }
                 } catch (Throwable t) {
-                    appendLog("[!] manager: step failed: " + t.getMessage() + "\n");
+                    appendLog("[!] manager: step failed: " + message(t) + "\n");
                 }
 
                 String[] env = new String[]{
@@ -504,6 +820,10 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                         + " ./wr_timerfd >> " + quote(RUN_LOG)
                         + " 2>&1 < /dev/null & fi";
                 appendLog("[*] planting wr_timerfd detached from Shizuku\n");
+                record = RunStore.begin(this, current.build, current.verified, current.rev);
+                RunStore.markPlanted(this, current.build);
+                planted = true;
+                RunService.update("Planting wr_timerfd");
                 Process launcher = ShizukuBridge.exec(
                         new String[]{"/system/bin/sh", "-c", launch},
                         env, PayloadStore.REMOTE_DIR);
@@ -534,6 +854,8 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     appendLog(unknown
                             ? "[-] cannot see wr_timerfd; Shizuku is unavailable\n"
                             : "[-] wr_timerfd did not start\n");
+                    outcome = "did not start";
+                    RunService.update("wr_timerfd did not start");
                     String runTail = captureShell("tail -c 4096 " + quote(RUN_LOG)
                             + " 2>/dev/null", 5000L);
                     if (!runTail.trim().isEmpty() && !runTail.startsWith("error:")) {
@@ -553,15 +875,16 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     pump(tail.getInputStream(), "out");
                     pump(tail.getErrorStream(), "err");
                 } catch (Throwable t) {
-                    appendLog("[!] live log unavailable: " + t.getMessage() + "\n");
+                    appendLog("[!] live log unavailable: " + message(t) + "\n");
                 }
 
-                long startedAt = System.currentTimeMillis();
+                long runStartedAt = System.currentTimeMillis();
                 String logTail = "";
                 boolean done = false;
                 boolean alive = true;
                 boolean lost = false;
                 long lastPidCheck = 0;
+                long lastNotify = 0;
                 while (true) {
                     logTail = captureShell("tail -c 4096 " + quote(LOAD_LOG)
                             + " 2>/dev/null", 8000L);
@@ -569,8 +892,13 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                         done = true;
                         break;
                     }
-                    if (System.currentTimeMillis() - startedAt > SUPERVISE_MS) {
+                    if (System.currentTimeMillis() - runStartedAt > SUPERVISE_MS) {
                         break;
+                    }
+                    if (System.currentTimeMillis() - lastNotify >= 5000) {
+                        lastNotify = System.currentTimeMillis();
+                        RunService.update("Waiting for done ("
+                                + (System.currentTimeMillis() - startedAt) / 1000 + "s)");
                     }
                     if (System.currentTimeMillis() - lastPidCheck >= 2000) {
                         lastPidCheck = System.currentTimeMillis();
@@ -600,7 +928,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     Thread.sleep(POLL_MS);
                 }
 
-                long elapsed = (System.currentTimeMillis() - startedAt) / 1000;
+                long elapsed = (System.currentTimeMillis() - runStartedAt) / 1000;
                 if (!done) {
                     logTail = captureShell("tail -c 4096 " + quote(LOAD_LOG)
                             + " 2>/dev/null", 8000L);
@@ -608,6 +936,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 }
 
                 if (done) {
+                    outcome = "done";
                     appendLog("[+] helper reached done after " + elapsed + "s\n");
                     String id = captureShell("su -c " + quote("id"), 20000L).trim();
                     appendLog("[*] su -c id: " + id + "\n");
@@ -619,26 +948,39 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                         appendLog("[!] helper finished but su did not return uid=0\n");
                     }
                     appendLog("[i] exploit stays parked until reboot; do not kill it\n");
+                    RunService.update("Run done, checking root");
+                    RunChecks.Result checks = RunChecks.run(text -> appendLog(text + "\n"));
+                    appendLog(checks.text() + "\n");
+                    detail = checks.oneLine();
+                    ui.post(() -> showChecks(checks.text()));
                 } else if (!alive) {
+                    outcome = "vanished";
                     appendLog("[-] wr_timerfd disappeared before done after "
                             + elapsed + "s\n");
                     if (!logTail.trim().isEmpty() && !logTail.startsWith("error:")) {
                         appendLog("[i] helper log tail:\n" + logTail.trim() + "\n");
                     }
                     appendLog("[i] reboot before trying again\n");
+                    detail = "process vanished before done";
                 } else if (lost) {
+                    outcome = "lost";
                     appendLog("[!] lost Shizuku for " + elapsed
                             + "s; the exploit is detached and may still be running\n");
                     appendLog("[i] do not replant; reboot if you want to retry\n");
+                    detail = "lost Shizuku during supervision";
                 } else {
+                    outcome = "timeout";
                     appendLog("[!] no done after " + elapsed + "s; exploit still running\n");
                     appendLog("[i] leave it parked and reboot when you want to retry\n");
                     if (!logTail.trim().isEmpty() && !logTail.startsWith("error:")) {
                         appendLog("[i] helper log tail:\n" + logTail.trim() + "\n");
                     }
+                    detail = "no done after " + elapsed + "s";
                 }
             } catch (Throwable t) {
-                appendLog("[-] run failed: " + t.getMessage() + "\n");
+                outcome = "error";
+                detail = message(t);
+                appendLog("[-] run failed: " + message(t) + "\n");
             } finally {
                 if (tail != null) {
                     try {
@@ -650,7 +992,85 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     }
                     tailProcess = null;
                 }
+                if (planted && record != null) {
+                    RunStore.finish(this, record, outcome, detail, ksuReady, swapped);
+                    ui.post(this::rebuildHistory);
+                }
+                RunService.stop(this);
                 setBusy(false);
+            }
+        });
+    }
+
+    private void showChecks(String text) {
+        if (checksText == null) {
+            return;
+        }
+        checksText.setText(text);
+        checksCard.setVisibility(View.VISIBLE);
+    }
+
+    private void showCommandOutput(String text) {
+        if (commandOutput == null) {
+            return;
+        }
+        commandOutput.setText(text);
+        commandOutput.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void runChecksNow() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                appendLog("[*] running root checks\n");
+                RunChecks.Result checks = RunChecks.run(text -> appendLog(text + "\n"));
+                appendLog(checks.text() + "\n");
+                if (checks.root()) {
+                    ksuReady = true;
+                }
+                ui.post(() -> {
+                    showChecks(checks.text());
+                    showCommandOutput(checks.text());
+                });
+            } catch (Throwable t) {
+                appendLog("[-] checks failed: " + message(t) + "\n");
+            } finally {
+                setBusy(false);
+                ui.post(this::refreshStatus);
+            }
+        });
+    }
+
+    private void repairManager() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                ManagerPin.Result result = ManagerPin.ensure(
+                        getFilesDir(),
+                        (command, timeoutMs) ->
+                                captureShell(command, timeoutMs, "/data/local/tmp"),
+                        text -> appendLog(text + "\n"));
+                appendLog("[i] manager: " + (result.pinned ? "pinned" : "not pinned")
+                        + " (" + result.detail + ")\n");
+            } catch (Throwable t) {
+                appendLog("[!] manager: step failed: " + message(t) + "\n");
+            } finally {
+                setBusy(false);
+                ui.post(this::refreshManagerStatus);
             }
         });
     }
@@ -663,7 +1083,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             requestShizuku();
             return;
         }
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Restart SystemUI?")
                 .setMessage("This needs root and restarts com.android.systemui so the "
                         + "interface reloads.\n\n"
@@ -687,12 +1107,12 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 if (!id.contains("uid=0")) {
                     ksuReady = false;
                     appendLog("[-] restart SystemUI needs root; su did not return uid=0\n");
-                    ui.post(() -> new AlertDialog.Builder(this)
+                    ui.post(() -> new MaterialAlertDialogBuilder(this)
                             .setTitle("Root required")
                             .setMessage("Restarting SystemUI only works with root, and su did "
                                     + "not return uid=0 on this boot.\n\n"
                                     + "Run the exploit first and confirm root with "
-                                    + "\"Check root\".")
+                                    + "\"Run checks\".")
                             .setPositiveButton("OK", null)
                             .show());
                     return;
@@ -712,12 +1132,163 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                     appendLog("[!] SystemUI pid not visible; check the screen\n");
                 }
             } catch (Throwable t) {
-                appendLog("[-] restart failed: " + t.getMessage() + "\n");
+                appendLog("[-] restart failed: " + message(t) + "\n");
             } finally {
                 setBusy(false);
                 ui.post(this::refreshStatus);
             }
         });
+    }
+
+    private void confirmSoftReboot() {
+        if (busy.get()) {
+            return;
+        }
+        if (!ShizukuBridge.isRunning() || !ShizukuBridge.isGranted()) {
+            requestShizuku();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Soft reboot?")
+                .setMessage("This runs the same soft reboot as KernelSU Manager "
+                        + "(ksud soft-reboot).\n\n"
+                        + "Android's userspace stops and starts again: all apps close, the "
+                        + "screen goes black, and the lock screen appears.\n\n"
+                        + "The kernel is not rebooted and root stays loaded. A parked exploit "
+                        + "stays parked, and this boot's ledger entry is not cleared.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Soft reboot", (d, w) -> softReboot())
+                .show();
+    }
+
+    private void softReboot() {
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                String id = captureShell("su -c " + quote("id"), 20000L).trim();
+                appendLog("[*] su -c id: " + id + "\n");
+                if (!id.contains("uid=0")) {
+                    ksuReady = false;
+                    appendLog("[-] soft reboot needs root; su did not return uid=0\n");
+                    ui.post(() -> new MaterialAlertDialogBuilder(this)
+                            .setTitle("Root required")
+                            .setMessage("The KernelSU soft reboot needs root, and su did not "
+                                    + "return uid=0 on this boot.\n\n"
+                                    + "Run the exploit first.")
+                            .setPositiveButton("OK", null)
+                            .show());
+                    return;
+                }
+                ksuReady = true;
+                String binary = null;
+                if (captureShell("test -x " + quote(STAGED_KSUD)
+                        + " && echo yes || echo no", 15000L).contains("yes")) {
+                    binary = STAGED_KSUD;
+                } else if (captureShell("su -c " + quote("test -x " + ADB_KSUD
+                        + " && echo yes || echo no"), 15000L).contains("yes")) {
+                    binary = ADB_KSUD;
+                }
+                if (binary == null) {
+                    appendLog("[-] soft reboot: no ksud binary found\n");
+                    return;
+                }
+                appendLog("[*] soft reboot: " + binary + " soft-reboot\n");
+                appendLog("[i] the framework restarts; the kernel boot id does not change\n");
+                String out = captureShell("su -c " + quote(binary + " soft-reboot"), 30000L);
+                if (out.contains("failed") || out.contains("denied")
+                        || out.startsWith("error:")) {
+                    appendLog("[!] soft reboot said: " + out.trim() + "\n");
+                    appendLog("[i] not retrying\n");
+                } else if (!out.trim().isEmpty()) {
+                    appendLog(out.trim() + "\n");
+                }
+            } catch (Throwable t) {
+                appendLog("[-] soft reboot failed: " + message(t) + "\n");
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
+    private void confirmDiagnostics() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Export diagnostics?")
+                .setMessage("Writes every log from " + PayloadStore.REMOTE_DIR
+                        + " and this session's app log to one text file, then opens the "
+                        + "share sheet.\n\n"
+                        + "Nothing is trimmed or capped. Works without root; root adds the "
+                        + "files that only su can read.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Export", (d, w) -> exportDiagnostics())
+                .show();
+    }
+
+    private void exportDiagnostics() {
+        final String session = logBuffer.toString();
+        final String header = diagnosticsHeader();
+        executor.execute(() -> {
+            setBusy(true);
+            try {
+                File file = Diagnostics.export(this, header, session, ksuReady,
+                        text -> appendLog(text + "\n"));
+                ui.post(() -> shareFile(file));
+            } catch (Throwable t) {
+                appendLog("[-] diagnostics failed: " + message(t) + "\n");
+            } finally {
+                setBusy(false);
+            }
+        });
+    }
+
+    private String diagnosticsHeader() {
+        StringBuilder out = new StringBuilder();
+        out.append("Time My Galaxy diagnostics\n");
+        out.append("generated ").append(RunStore.time(System.currentTimeMillis())).append('\n');
+        out.append("app ").append(BuildConfig.VERSION_NAME).append(" (")
+                .append(BuildConfig.VERSION_CODE).append(")\n");
+        out.append("commit ").append(BuildConfig.GIT_COMMIT).append('\n');
+        out.append(BuildInfo.from(target).describe()).append('\n');
+        out.append("shizuku ").append(ShizukuBridge.isRunning()
+                ? (ShizukuBridge.isGranted() ? "granted" : "running, no permission") : "off")
+                .append('\n');
+        out.append("manager ").append(managerStatus == null ? "?" : managerStatus.getText())
+                .append('\n');
+        out.append("ledger ")
+                .append(RunStore.blockReason(this) == null ? "clear" : "blocked this boot")
+                .append('\n');
+        out.append("\n== last runs ==\n");
+        List<RunStore.RunRecord> runs = RunStore.history(this);
+        for (int i = 0; i < runs.size() && i < 10; i++) {
+            RunStore.RunRecord run = runs.get(i);
+            out.append(RunStore.time(run.startedAt)).append("  ").append(run.build)
+                    .append("  ").append(run.outcome).append("  ").append(run.meta());
+            if (run.detail != null && !run.detail.isEmpty()) {
+                out.append("\n    ").append(run.detail);
+            }
+            out.append('\n');
+        }
+        if (runs.isEmpty()) {
+            out.append("none\n");
+        }
+        out.append("\n== last checks ==\n");
+        out.append(checksText == null || checksText.getText().length() == 0
+                ? "none" : checksText.getText().toString());
+        return out.toString();
+    }
+
+    private void shareFile(File file) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", file);
+            Intent send = new Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .putExtra(Intent.EXTRA_SUBJECT, "Time My Galaxy diagnostics")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(send, "Share diagnostics"));
+        } catch (Throwable t) {
+            appendLog("[!] share failed: " + message(t) + "\n");
+            appendLog("[i] file kept at " + file.getAbsolutePath() + "\n");
+        }
     }
 
     private void runRootCommand() {
@@ -733,13 +1304,17 @@ public class MainActivity extends Activity implements PayloadStore.Log {
             command = "id";
         }
         final String finalCommand = command;
+        hideKeyboard();
         executor.execute(() -> {
             setBusy(true);
             try {
                 appendLog("$ su -c " + finalCommand + "\n");
+                ui.post(() -> showCommandOutput("$ su -c " + finalCommand + "\nRunning…"));
                 String out = captureShell("su -c " + ShizukuBridge.shellQuote(finalCommand),
                         20000L);
                 appendLog(out.endsWith("\n") || out.isEmpty() ? out : out + "\n");
+                ui.post(() -> showCommandOutput("$ su -c " + finalCommand + "\n"
+                        + (out.isEmpty() ? "(no output)" : out)));
                 if (out.contains("uid=0")) {
                     ksuReady = true;
                     ui.post(this::refreshStatus);
@@ -748,6 +1323,82 @@ public class MainActivity extends Activity implements PayloadStore.Log {
                 setBusy(false);
             }
         });
+    }
+
+    private void copyLog() {
+        List<AnsiLog.Run> runs = AnsiLog.parse(logBuffer, ansiDefaultColor, darkTheme);
+        StringBuilder text = new StringBuilder();
+        for (AnsiLog.Run run : runs) {
+            text.append(run.text);
+        }
+        ClipboardManager clipboard = getSystemService(ClipboardManager.class);
+        if (clipboard == null) {
+            return;
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("Time My Galaxy log", text));
+        Toast.makeText(this, "Log copied", Toast.LENGTH_SHORT).show();
+    }
+
+    private void rebuildHistory() {
+        if (historyList == null) {
+            return;
+        }
+        List<RunStore.RunRecord> runs = RunStore.history(this);
+        historyList.removeAllViews();
+        historyEmpty.setVisibility(runs.isEmpty() ? View.VISIBLE : View.GONE);
+        clearHistoryButton.setVisibility(runs.isEmpty() ? View.GONE : View.VISIBLE);
+        for (RunStore.RunRecord run : runs) {
+            View item = getLayoutInflater().inflate(R.layout.item_run, historyList, false);
+            TextView outcome = item.findViewById(R.id.runOutcome);
+            outcome.setText(run.outcome);
+            outcome.setTextColor(getColor("done".equals(run.outcome)
+                    ? R.color.tmg_good : R.color.tmg_bad));
+            ((TextView) item.findViewById(R.id.runBuild)).setText(run.build);
+            ((TextView) item.findViewById(R.id.runWhen)).setText(RunStore.time(run.startedAt));
+            TextView detail = item.findViewById(R.id.runDetail);
+            detail.setText(run.detail == null || run.detail.isEmpty() ? "No detail" : run.detail);
+            ((TextView) item.findViewById(R.id.runMeta)).setText(run.meta());
+            historyList.addView(item);
+        }
+    }
+
+    private void confirmClearHistory() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Clear history?")
+                .setMessage("Removes the saved run cards. The boot ledger and the logs in "
+                        + PayloadStore.REMOTE_DIR + " are not touched.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear", (d, w) -> {
+                    RunStore.clearHistory(this);
+                    rebuildHistory();
+                })
+                .show();
+    }
+
+    private void showLedgerDialog(String message) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Reboot required")
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void showKeyboard() {
+        if (commandInput == null) {
+            return;
+        }
+        commandInput.requestFocus();
+        InputMethodManager ime = getSystemService(InputMethodManager.class);
+        if (ime != null) {
+            ime.showSoftInput(commandInput, InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    private void hideKeyboard() {
+        InputMethodManager ime = getSystemService(InputMethodManager.class);
+        if (ime != null && commandInput != null) {
+            ime.hideSoftInputFromWindow(commandInput.getWindowToken(), 0);
+        }
     }
 
     /**
@@ -830,58 +1481,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
 
     /** Runs a shell command through Shizuku with a timeout, merging stdout/stderr. */
     private String captureShell(String command, long timeoutMs, String dir) {
-        Process process = null;
-        StringBuilder out = new StringBuilder();
-        try {
-            process = ShizukuBridge.exec(new String[]{"/system/bin/sh", "-c", command},
-                    null, dir);
-            final Process proc = process;
-            Thread stdout = drain(proc.getInputStream(), out);
-            Thread stderr = drain(proc.getErrorStream(), out);
-            // RemoteProcess.exitValue() is not an IllegalThreadStateException,
-            // so Process.waitFor(timeout) cannot be used here.
-            long deadline = System.currentTimeMillis() + timeoutMs;
-            while (process.isAlive() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(50);
-            }
-            boolean timedOut = process.isAlive();
-            if (timedOut) {
-                appendLog("[!] command timed out after " + timeoutMs / 1000 + "s\n");
-                process.destroy();
-            }
-            stdout.join(1500);
-            stderr.join(1500);
-            synchronized (out) {
-                if (!timedOut && !ShizukuBridge.isRunning()) {
-                    return "error: shizuku unavailable";
-                }
-                return out.toString();
-            }
-        } catch (Throwable t) {
-            return "error: " + t.getMessage();
-        } finally {
-            if (process != null && process.isAlive()) {
-                process.destroy();
-            }
-        }
-    }
-
-    private Thread drain(InputStream stream, StringBuilder out) {
-        Thread thread = new Thread(() -> {
-            byte[] buffer = new byte[4096];
-            try {
-                int read;
-                while ((read = stream.read(buffer)) > 0) {
-                    synchronized (out) {
-                        out.append(new String(buffer, 0, read));
-                    }
-                }
-            } catch (IOException ignored) {
-            }
-        }, "capture");
-        thread.setDaemon(true);
-        thread.start();
-        return thread;
+        return Shell.capture(command, timeoutMs, dir, text -> appendLog(text + "\n")).out;
     }
 
     private Thread pump(InputStream stream, String tag) {
@@ -913,7 +1513,7 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         if (payloadError != null) {
             message.append("\n\nLast error: ").append(payloadError);
         }
-        new AlertDialog.Builder(this)
+        new MaterialAlertDialogBuilder(this)
                 .setTitle("Payload not available")
                 .setMessage(message.toString())
                 .setPositiveButton("OK", null)
@@ -927,17 +1527,24 @@ public class MainActivity extends Activity implements PayloadStore.Log {
 
     private void appendLog(String text) {
         ui.post(() -> {
-            boolean follow = followLogs;
             logBuffer.append(text);
             if (logBuffer.length() > LOG_LIMIT) {
                 logBuffer.delete(0, logBuffer.length() - LOG_LIMIT / 2);
                 logBuffer.insert(0, "[... earlier output dropped ...]\n");
             }
-            logView.setText(renderLog());
-            if (follow) {
-                logScroll.post(() -> logScroll.scrollTo(0, logView.getBottom()));
-            }
+            renderLogNow();
         });
+    }
+
+    private void renderLogNow() {
+        if (logView == null) {
+            return;
+        }
+        boolean follow = followLogs;
+        logView.setText(renderLog());
+        if (follow) {
+            logScroll.post(() -> logScroll.scrollTo(0, logView.getBottom()));
+        }
     }
 
     private CharSequence renderLog() {
@@ -966,16 +1573,21 @@ public class MainActivity extends Activity implements PayloadStore.Log {
         return out;
     }
 
-    private int accentColor() {
-        return darkTheme ? 0xFF6BE86B : 0xFF0A6B0A;
-    }
-
     private boolean isLogAtBottom() {
         View child = logScroll.getChildAt(0);
         if (child == null || logScroll.getHeight() == 0) {
             return true;
         }
         return child.getBottom() - (logScroll.getHeight() + logScroll.getScrollY()) <= dp(24);
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static String message(Throwable t) {
+        String text = t.getMessage();
+        return text == null || text.isEmpty() ? t.getClass().getSimpleName() : text;
     }
 
     @Override

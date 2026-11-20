@@ -16,6 +16,8 @@ Outputs, one set per build:
     <out>/<BUILD>.json              signed sha256 table and metadata
     <out>/<BUILD>.json.sig          RSA signature over the exact JSON bytes
     <out>/payload-<BUILD>.zip       wr_timerfd, wr_exec, ksud, profile.json
+    <out>/index.json                signed list of supported builds
+    <out>/index.json.sig            RSA signature over the exact index bytes
 """
 
 import argparse
@@ -100,6 +102,7 @@ def main():
 
     os.makedirs(out, exist_ok=True)
     generated = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    index_builds = []
 
     for profile_path in profiles:
         build = os.path.basename(os.path.dirname(profile_path))
@@ -147,9 +150,29 @@ def main():
             handle.write(raw)
         sign(key, raw, json_path + ".sig")
 
+        index_builds.append({
+            "build": build,
+            "model": manifest["model"],
+            "soc": manifest["soc"],
+            "android": manifest["android"],
+            "verified": manifest["verified"],
+            "rev": rev,
+        })
         print(f"{build}  rev={rev}  zip={manifest['sha256']}")
 
-    print(f"wrote {len(profiles)} build(s) to {out}")
+    index = {
+        "schema": SCHEMA,
+        "rev": rev,
+        "generated": generated,
+        "builds": index_builds,
+    }
+    raw = (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    index_path = os.path.join(out, "index.json")
+    with open(index_path, "wb") as handle:
+        handle.write(raw)
+    sign(key, raw, index_path + ".sig")
+
+    print(f"wrote {len(profiles)} build(s) and the signed index to {out}")
 
 
 if __name__ == "__main__":
