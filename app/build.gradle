@@ -44,8 +44,8 @@ android {
         applicationId 'dev.lukag.timemygalaxy'
         minSdk 31
         targetSdk 35
-        versionCode 6
-        versionName '1.4'
+        versionCode 7
+        versionName '1.5'
 
         buildConfigField "String", "GIT_COMMIT", "\"${gitCommit}\""
         buildConfigField "String", "REPO_URL",
