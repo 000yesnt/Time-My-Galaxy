@@ -3197,7 +3197,7 @@
     "TIMER_SITE_LOW16": "STATIC_TIMER_SITE & 0xffff",
     "VMEMMAP_BASE": "arm64 VMEMMAP for VA_BITS=39"
   },
-  "generated": "2026-11-22T13:20:52Z",
+  "generated": "2026-11-22T14:15:32Z",
   "inputs": [
     {
       "path": "/home/lukag/X236BXXS7BZI3/AP_X236BXXS7BZI3_X236BXXS7BZI3_MQB114614997_REV00_user_low_ship_MULTI_CERT_meta_OS16.tar.md5",
@@ -3285,7 +3285,7 @@
     "INIT_UTS_NODENAME_STATIC": "0xffffffc00a341251",
     "KDP_ENABLE_STATIC": "0xffffffc0096e2f18",
     "LINEAR_MAP_BASE": "0xffffff8000000000",
-    "MEMSTART_PAGE": "0x80000",
+    "MEMSTART_PAGE": "0x40000",
     "OFF_TASK_ATOMIC_FLAGS": "0x5f0",
     "OFF_TASK_CRED": "0x838",
     "OFF_TASK_SECCOMP": "0x900",
@@ -3306,6 +3306,6 @@
   },
   "verified": false,
   "warnings": [
-    "MEMSTART_PAGE is board runtime data; using 0x80000 (change with --memstart-page if needed)"
+    "MEMSTART_PAGE is board runtime data; using 0x40000 (change with --memstart-page if needed)"
   ]
 }
