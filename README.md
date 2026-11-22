@@ -53,6 +53,7 @@ Supported builds:
 - `S731NKSU9CZIF`
 - `A376BXXS6BZJ1`
 - `S731U1UES7BZF3`
+- `X236BXXS7BZI3`
 
 Each build has a porter-generated `payloads/<BUILD>/profile.json`, and its
 kernel release needs a `payloads/ksud-<release>` helper. The app downloads only

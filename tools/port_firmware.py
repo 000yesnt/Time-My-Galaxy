@@ -748,6 +748,7 @@ def infer_soc(build: str) -> str:
     # Only add entries that are known for certain; unknown is better than wrong.
     table = {
         "S731": "Exynos 2400",
+        "X236": "Dimensity 7300",
     }
     return table.get(build[:4], "unknown")
 
