@@ -3234,6 +3234,7 @@
     "vmlinux_elf": "port-out/X236BXXS7BZI3/work/vmlinux.elf"
   },
   "values": {
+    "X236B_DEBUG": "1",
     "ANON_PIPE_BUF_OPS_STATIC": "0xffffffc009158a10",
     "CFG_OFF_BIN_BUFFER": "0x58",
     "CFG_OFF_BIN_SIZE": "0x60",
